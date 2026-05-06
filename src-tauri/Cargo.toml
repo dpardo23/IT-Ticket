@@ -29,5 +29,5 @@ tauri-plugin-log = "2"
 panic = "abort"
 codegen-units = 1
 lto = true
-opt-level = "3"
+opt-level = 3
 strip = true
