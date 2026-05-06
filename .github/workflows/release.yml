@@ -1,0 +1,60 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*' # Esto activará la compilación SOLO cuando crees un tag como v1.0.0
+  workflow_dispatch: # Permite ejecutar la acción manualmente desde la web de GitHub
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 1. Configurar Node y PNPM
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      # 2. Instalar dependencias del SO para Linux
+      - name: Install Ubuntu dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      # 3. Instalar Rust
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # 4. Compilar Frontend
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Build frontend
+        run: pnpm build
+
+      # 5. Compilar Tauri y crear el Release de GitHub
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: app-v__VERSION__ # Toma la versión de tu package.json
+          releaseName: 'IT Ticket AI v__VERSION__'
+          releaseBody: 'Instaladores generados automáticamente para Windows, macOS y Linux.'
+          releaseDraft: true # Crea un borrador; lo publicas tú manualmente cuando estés seguro.
+          prerelease: false
