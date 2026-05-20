@@ -1,50 +1,13 @@
-import type { Metadata, Viewport } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
-import { ThemeProvider } from '@/components/theme-provider'
-import { AuthProvider } from '@/lib/auth-context'
-import { Analytics } from '@vercel/analytics/next'
-import './globals.css'
+import type { Metadata } from "next"
+import { Inter } from "next/font/google"
+import "./globals.css"
+import { ThemeProvider } from "@/components/theme-provider"
 
-const geistSans = Geist({
-  subsets: ["latin"],
-  variable: "--font-geist-sans",
-});
-
-const geistMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-geist-mono",
-});
+const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: 'IT Ticket AI - Sistema Inteligente de Clasificación de Tickets',
-  description: 'Sistema de clasificación y gestión de tickets de TI potenciado por IA con categorización automática y triaje inteligente.',
-  generator: 'v0.app',
-  icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
-  },
-}
-
-export const viewport: Viewport = {
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#FAFAFA' },
-    { media: '(prefers-color-scheme: dark)', color: '#0D0D0D' },
-  ],
-  width: 'device-width',
-  initialScale: 1,
+  title: "Clasificador IA - IT Ticket",
+  description: "Playground de inferencia predictiva para soporte técnico",
 }
 
 export default function RootLayout({
@@ -53,19 +16,16 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="es" suppressHydrationWarning className="bg-background">
-      <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}>
+    <html lang="es" suppressHydrationWarning>
+      <body className={inter.className}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
+          defaultTheme="system"
           enableSystem
           disableTransitionOnChange
         >
-          <AuthProvider>
-            {children}
-          </AuthProvider>
+          {children}
         </ThemeProvider>
-        {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
   )

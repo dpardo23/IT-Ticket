@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "fastapi": "cd backend && . venv/bin/activate && uvicorn main:app --reload",
+    "dev:all": "concurrently -c \"cyan,magenta\" -n \"BACKEND,FRONTEND\" \"pnpm run fastapi\" \"pnpm run dev\""
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -68,6 +70,7 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
     "postcss": "^8.5",
     "tailwindcss": "^4.2.0",
     "tw-animate-css": "1.3.3",
