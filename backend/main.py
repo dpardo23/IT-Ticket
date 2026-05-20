@@ -1,126 +1,293 @@
-import time
-import numpy as np
-import re
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
 import pandas as pd
-import io
+import time
 
-from core.nlp_processor import clean_text, get_tokens_list
-from core.mnb_model import ITTicketClassifier, DEPARTMENTS
+from core.model_engine import ITTicketClassifierEngine
+from core.nlp_processor import preprocess_text
+from core.storage import (
+    load_master_dataset,
+    append_feedback
+)
 
-app = FastAPI(title="Motor NLP - IT Ticket Classification", version="1.0.0")
+# ======================================================
+# APP
+# ======================================================
+
+app = FastAPI(title="AI Ticket Classifier")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-model_engine = ITTicketClassifier()
+# ======================================================
+# ENGINE
+# ======================================================
 
-class TicketManual(BaseModel):
+engine = ITTicketClassifierEngine()
+
+# ======================================================
+# REQUEST MODELS
+# ======================================================
+
+class PredictRequest(BaseModel):
     title: str
     description: str
+
 
 class FeedbackRequest(BaseModel):
     original_text: str
     correct_department: str
 
-def is_garbage(text: str) -> bool:
-    """Validador heurístico de calidad de datos para evitar inyección de ruido."""
-    text_strip = text.strip()
-    if len(text_strip) < 15: return True
-    words = text_strip.split()
-    if len(words) < 3: return True
-    if any(len(w) > 25 for w in words): return True
-    # Detecta spam repetitivo (ej: "aaaaa", "11111")
-    if re.search(r'(.)\1{4,}', text_strip.lower()): return True
-    # Detecta baja entropía (ej: texto muy plano)
-    if len(set(text_strip.lower())) < 5 and len(text_strip) > 20: return True
-    return False
 
-@app.post("/api/predict")
-async def predict_single(ticket: TicketManual):
-    if not model_engine.classifier:
-        raise HTTPException(status_code=500, detail="El modelo no está entrenado.")
-        
-    full_text = ticket.title + " " + ticket.description
-    
-    # 1. Validación de seguridad
-    if is_garbage(full_text):
-        return {
-            "is_garbage": True,
-            "message": "Análisis Rechazado: El ticket contiene datos inválidos o carece de estructura técnica suficiente para la IA."
-        }
+# ======================================================
+# HELPERS
+# ======================================================
 
-    start_time = time.time()
-    
-    cleaned = clean_text(full_text)
-    tokens = get_tokens_list(full_text)
-    winner, probabilities, top_tfidf = model_engine.predict(cleaned)
-    criticality = model_engine.get_criticality(full_text)
-    
+def normalize_probabilities(results):
+    """
+    Convierte:
+    [
+        {"name":"Redes","value":92}
+    ]
+
+    a:
+
+    {
+        "Redes":0.92
+    }
+    """
+
+    probs = {}
+
+    for item in results:
+        name = item.get("name")
+        value = item.get("value", 0)
+
+        try:
+            probs[name] = float(value) / 100.0
+        except:
+            probs[name] = 0.0
+
+    return probs
+
+
+def normalize_tfidf(top_tfidf):
+    """
+    Convierte:
+    token -> term
+    """
+
+    normalized = []
+
+    for item in top_tfidf:
+        normalized.append({
+            "term": item.get("token", ""),
+            "weight": item.get("weight", 0)
+        })
+
+    return normalized
+
+
+# ======================================================
+# HEALTH
+# ======================================================
+
+@app.get("/")
+def root():
     return {
-        "is_garbage": False,
-        "title": ticket.title,
-        "original": ticket.description,
-        "tokens": tokens,
-        "topTfidf": top_tfidf,
-        "probabilities": probabilities,
-        "winner": winner,
-        "level": criticality,
-        "f1Score": model_engine.global_f1,
-        "optimalAlpha": model_engine.optimal_alpha,
-        "bestModelName": model_engine.best_model_name,
-        "confusionMatrix": model_engine.global_cm,
-        "latency": int((time.time() - start_time) * 1000)
+        "status": "ok",
+        "model_ready": engine.is_ready(),
+        "model": engine.best_model_name
     }
 
+
+# ======================================================
+# PREDICT
+# ======================================================
+
+@app.post("/api/predict")
+def predict(req: PredictRequest):
+
+    if not engine.is_ready():
+        raise HTTPException(
+            status_code=500,
+            detail="Modelo no entrenado."
+        )
+
+    start = time.time()
+
+    original_text = f"{req.title}\n{req.description}"
+
+    # NLP
+    cleaned_text, tokens = preprocess_text(original_text)
+
+    # heurística basura
+    if len(tokens) < 2:
+        return {
+            "is_garbage": True,
+            "message": "Texto inválido o insuficiente."
+        }
+
+    # inferencia
+    winner, results, top_tfidf = engine.predict(cleaned_text)
+
+    latency = int((time.time() - start) * 1000)
+
+    return {
+        "winner": winner,
+
+        # FRONTEND SAFE
+        "probabilities": normalize_probabilities(results),
+
+        "tokens": tokens,
+
+        "latency": latency,
+
+        "level": engine.get_criticality(original_text),
+
+        # NUEVOS CAMPOS
+        "originalText": original_text,
+        "cleanText": cleaned_text,
+
+        # FRONTEND SAFE
+        "topTfidf": normalize_tfidf(top_tfidf),
+
+        "is_garbage": False
+    }
+
+
+# ======================================================
+# FEEDBACK
+# ======================================================
+
 @app.post("/api/feedback")
-async def online_learning(feedback: FeedbackRequest):
-    if feedback.correct_department not in DEPARTMENTS:
-         raise HTTPException(status_code=400, detail="Departamento inválido.")
-    
-    cleaned = clean_text(feedback.original_text)
-    model_engine.partial_fit(cleaned, feedback.correct_department)
-    return {"status": "success"}
+def feedback(req: FeedbackRequest):
+
+    original_text = req.original_text
+    correct_department = req.correct_department
+
+    cleaned_text, _ = preprocess_text(original_text)
+
+    # guardar feedback
+    append_feedback(original_text, correct_department)
+
+    # aprendizaje incremental
+    learned_immediately = engine.partial_fit(
+        cleaned_text,
+        correct_department
+    )
+
+    retrained_batch = False
+
+    # retraining automático
+    if engine.should_retrain_due_feedback():
+        master_df = load_master_dataset()
+
+        texts = master_df["text"].tolist()
+        labels = master_df["department"].tolist()
+
+        engine.train_batch_from_dataset(texts, labels)
+
+        retrained_batch = True
+
+    return {
+        "success": True,
+        "learnedImmediately": learned_immediately,
+        "retrainedBatch": retrained_batch,
+        "message": "Feedback procesado correctamente."
+    }
+
+
+# ======================================================
+# BATCH
+# ======================================================
 
 @app.post("/api/batch")
-async def process_batch(file: UploadFile = File(...)):
+async def batch(file: UploadFile = File(...)):
+
+    if not engine.is_ready():
+        raise HTTPException(
+            status_code=500,
+            detail="Modelo no entrenado."
+        )
+
+    start = time.time()
+
     try:
-        contents = await file.read()
-        df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
-        
-        # Validación estricta de esquema
-        required_cols = ['titulo', 'descripcion', 'departamento']
-        if not all(col in df.columns for col in required_cols):
-             raise HTTPException(status_code=400, detail=f"Error CSV: Debe contener exactamente: {required_cols}")
-        
-        df = df.fillna('')
-        
-        all_cleaned = [clean_text(str(r['titulo']) + " " + str(r['descripcion'])) for _, r in df.iterrows()]
-        acc, f1_weight, cm, opt_alpha, best_mod = model_engine.train_batch(all_cleaned, df['departamento'].tolist())
-        
-        # Clasificación post-entrenamiento para métricas
-        predictions = [model_engine.predict(c)[0] for c in all_cleaned]
-        levels = {"Nivel 1 (Triaje Directo)": 0, "Nivel 2 (Especializado)": 0, "Nivel 3 (Crítico)": 0}
-        for _, r in df.iterrows():
-            levels[model_engine.get_criticality(str(r['titulo']) + " " + str(r['descripcion']))] += 1
-            
-        counts = pd.Series(predictions).value_counts().to_dict()
-        colors = {"SysAdmins": "#FF2A4D", "SecOps / IAM": "#CC223D", "NetOps": "#99192E", "Microinformática": "#E62645", "DevOps": "#801526", "Mesa de Servicios": "#B31E36"}
-        
-        return {
-            "processedCount": len(df),
-            "f1Score": round(f1_weight * 100, 2),
-            "confusionMatrix": cm,
-            "optimalAlpha": opt_alpha,
-            "bestModelName": best_mod,
-            "departmentStats": [{"name": d, "tickets": c, "color": colors.get(d, "#FF2A4D")} for d, c in counts.items()],
-            "levelStats": [{"name": k, "value": v} for k, v in levels.items()]
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en procesamiento Batch: {str(e)}")
+        df = pd.read_csv(file.file)
+
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="CSV inválido."
+        )
+
+    if "text" not in df.columns:
+        raise HTTPException(
+            status_code=400,
+            detail="El CSV debe contener columna 'text'"
+        )
+
+    processed = 0
+    rejected = 0
+
+    distribution = {}
+
+    clean_texts = []
+    labels = []
+
+    for text in df["text"].fillna(""):
+
+        cleaned_text, tokens = preprocess_text(str(text))
+
+        if len(tokens) < 2:
+            rejected += 1
+            continue
+
+        winner, _, _ = engine.predict(cleaned_text)
+
+        distribution[winner] = distribution.get(winner, 0) + 1
+
+        clean_texts.append(cleaned_text)
+        labels.append(winner)
+
+        processed += 1
+
+    # métricas reales usando dataset maestro
+    master_df = load_master_dataset()
+
+    training_result = engine.train_batch_from_dataset(
+        master_df["text"].tolist(),
+        master_df["department"].tolist()
+    )
+
+    speed = int((time.time() - start) * 1000)
+
+    return {
+        "totalTickets": len(df),
+        "processedCount": processed,
+        "rejectedCount": rejected,
+
+        "f1Score": training_result["f1Score"] / 100.0,
+        "accuracy": training_result["accuracy"] / 100.0,
+
+        "bestModelName": training_result["bestModelName"],
+        "optimalAlpha": training_result["optimalAlpha"],
+
+        "confusionMatrix": training_result["confusionMatrix"],
+
+        "labels": list(distribution.keys()),
+
+        "departmentDistribution": distribution,
+
+        "globalTfidf": training_result["globalTfidf"],
+
+        "speed": speed
+    }

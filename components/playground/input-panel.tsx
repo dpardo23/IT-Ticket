@@ -1,129 +1,318 @@
 "use client"
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import React, { useMemo, useRef, useState } from "react"
+import { motion } from "framer-motion"
+import {
+    UploadCloud,
+    FileText,
+    Loader2,
+    PlayCircle,
+    ShieldAlert,
+    Keyboard,
+} from "lucide-react"
+
+import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
-import { Progress } from "@/components/ui/progress"
-import { Database, FileSpreadsheet, UploadCloud, Trash2 } from "lucide-react"
-import { useRef } from "react"
+import { toast } from "sonner"
 
 interface InputPanelProps {
-    activeTab: string;
-    setActiveTab: (val: string) => void;
-    isProcessing: boolean;
-    manualTitle: string;
-    setManualTitle: (val: string) => void;
-    manualTicket: string;
-    setManualTicket: (val: string) => void;
-    handleAnalyzeManual: () => void;
-    handleProcessCSV: () => void;
-    handleClear: () => void;
-    processedCount: number;
-    totalInCsv: number;
-    progressValue: number;
-    selectedFile: File | null;
-    setSelectedFile: (file: File | null) => void;
+    activeTab: "manual" | "batch"
+    setActiveTab: (tab: "manual" | "batch") => void
+    isProcessing: boolean
+    onManualSubmit: (title: string, description: string) => void
+    onBatchUpload: (file: File) => void
 }
 
-export function InputPanel(props: InputPanelProps) {
-    const { activeTab, setActiveTab, isProcessing, manualTitle, setManualTitle, manualTicket, setManualTicket, handleAnalyzeManual, handleProcessCSV, handleClear, processedCount, totalInCsv, progressValue, selectedFile, setSelectedFile } = props;
+export function InputPanel({
+    activeTab,
+    setActiveTab,
+    isProcessing,
+    onManualSubmit,
+    onBatchUpload,
+}: InputPanelProps) {
+    const [title, setTitle] = useState("")
+    const [description, setDescription] = useState("")
+    const [csvFile, setCsvFile] = useState<File | null>(null)
 
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null)
+
+    const maxDescLength = 800
+    const minDescLength = 15
+
+    const descCount = description.length
+
+    const descValid = useMemo(() => {
+        return descCount >= minDescLength
+    }, [descCount])
+
+    const handleManualClick = () => {
+        if (isProcessing) return
+
+        if (title.trim().length < 3) {
+            toast.warning("El título es muy corto", {
+                description: "Mínimo recomendado: 3 caracteres.",
+            })
+            return
+        }
+
+        if (!descValid) {
+            toast.warning("Descripción insuficiente", {
+                description: `Mínimo recomendado: ${minDescLength} caracteres.`,
+            })
+            return
+        }
+
+        onManualSubmit(title.trim(), description.trim())
+    }
+
+    const handleFileSelect = (file: File) => {
+        if (!file) return
+
+        if (!file.name.toLowerCase().endsWith(".csv")) {
+            toast.error("Solo se permiten archivos CSV")
+            return
+        }
+
+        setCsvFile(file)
+
+        toast.success("CSV cargado", {
+            description: file.name,
+        })
+
+        // Ejecutar automáticamente el batch al seleccionar
+        onBatchUpload(file)
+    }
 
     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-        e.preventDefault();
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            const file = e.dataTransfer.files[0];
-            if (file.name.endsWith('.csv')) setSelectedFile(file);
-        }
-    };
+        e.preventDefault()
+        if (isProcessing) return
 
-    const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-        e.preventDefault();
-    };
+        const file = e.dataTransfer.files?.[0]
+        if (!file) return
+
+        handleFileSelect(file)
+    }
+
+    const handleBrowseClick = () => {
+        if (isProcessing) return
+        fileInputRef.current?.click()
+    }
 
     return (
-        <Card className="flex flex-col h-full bg-card border-border shadow-md rounded-xl overflow-hidden min-h-0 xl:w-[26%] shrink-0">
-            <CardHeader className="shrink-0 border-b border-border bg-primary text-primary-foreground px-4 py-0 h-[65px] flex flex-col justify-center">
-                <CardTitle className="text-sm font-bold flex items-center gap-1.5">
-                    <Database size={16} /> Ingesta de Datos
-                </CardTitle>
-                <p className="text-[9px] text-primary-foreground/80 mt-0.5 font-normal">Carga de incidentes manual y por lotes</p>
-            </CardHeader>
-            <CardContent className="flex-1 min-h-0 p-4 flex flex-col overflow-y-auto">
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full h-full flex flex-col min-h-0">
-                    <TabsList className="shrink-0 grid w-full grid-cols-2 p-1 bg-muted/50 rounded-lg mb-3">
-                        <TabsTrigger value="manual" className="rounded-md text-[10px] font-bold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Ingreso Manual</TabsTrigger>
-                        <TabsTrigger value="csv" className="rounded-md text-[10px] font-bold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Carga por Lotes</TabsTrigger>
-                    </TabsList>
+        <Card className="h-full rounded-2xl border-border bg-card/70 backdrop-blur-md shadow-xl overflow-hidden flex flex-col">
+            {/* HEADER */}
+            <div className="h-[45px] px-4 flex items-center justify-between bg-gradient-to-r from-red-600 to-red-500 text-white">
+                <div className="flex items-center gap-2 font-semibold tracking-tight">
+                    <Keyboard size={16} />
+                    <span className="text-sm">Input Panel</span>
+                </div>
 
-                    <TabsContent value="manual" className="space-y-3 flex-1 flex flex-col min-h-0 mt-0">
-                        <div className="shrink-0 space-y-1 relative">
-                            <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Título (Asunto)</label>
-                            <Input maxLength={100} placeholder="Ej: No puedo acceder al ERP" className="bg-background border-border text-xs focus-visible:ring-primary h-8 pr-12" value={manualTitle} onChange={(e) => setManualTitle(e.target.value)} disabled={isProcessing} />
-                            <span className="absolute bottom-2 right-2 text-[8px] text-muted-foreground bg-background px-1">{manualTitle.length}/100</span>
-                        </div>
-                        <div className="space-y-1 flex-1 flex flex-col min-h-0 relative">
-                            <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Descripción (Raw Text)</label>
-                            <Textarea maxLength={2000} placeholder="Escribe el texto crudo del incidente..." className="flex-1 min-h-0 resize-none text-xs p-3 pb-6 rounded-lg border-border bg-background focus-visible:ring-primary leading-relaxed" value={manualTicket} onChange={(e) => setManualTicket(e.target.value)} disabled={isProcessing} />
-                            <span className="absolute bottom-2 right-2 text-[8px] text-muted-foreground bg-background px-1 rounded">{manualTicket.length}/2000</span>
-                        </div>
-                        <div className="flex gap-2 mt-1 shrink-0">
-                            <Button size="sm" variant="outline" className="h-8 w-10 shrink-0 border-border text-muted-foreground hover:text-destructive" onClick={handleClear} disabled={isProcessing}><Trash2 size={14} /></Button>
-                            <Button size="sm" className={`flex-1 font-bold rounded-lg h-8 text-[10px] ${isProcessing ? 'animate-pulse-glow bg-primary' : 'bg-primary hover:bg-primary/90'}`} onClick={handleAnalyzeManual} disabled={isProcessing || !manualTicket || !manualTitle}>
-                                {isProcessing ? "Llamando a la API..." : "Analizar Ticket"}
-                            </Button>
-                        </div>
-                    </TabsContent>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => !isProcessing && setActiveTab("manual")}
+                        className={`px-3 py-1 text-xs rounded-lg font-semibold transition-all ${activeTab === "manual"
+                                ? "bg-white/20 border border-white/30"
+                                : "opacity-70 hover:opacity-100"
+                            }`}
+                    >
+                        Manual
+                    </button>
 
-                    <TabsContent value="csv" className="space-y-3 flex-1 flex flex-col justify-between min-h-0 mt-0">
-                        <div
-                            onDrop={handleDrop}
-                            onDragOver={handleDragOver}
-                            className={`border-2 border-dashed rounded-lg p-3 flex flex-col items-center justify-center flex-1 transition-all duration-500 cursor-pointer min-h-0 ${selectedFile ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-primary/50 bg-muted/10'}`}
-                            onClick={() => fileInputRef.current?.click()}
+                    <button
+                        onClick={() => !isProcessing && setActiveTab("batch")}
+                        className={`px-3 py-1 text-xs rounded-lg font-semibold transition-all ${activeTab === "batch"
+                                ? "bg-white/20 border border-white/30"
+                                : "opacity-70 hover:opacity-100"
+                            }`}
+                    >
+                        Batch
+                    </button>
+                </div>
+            </div>
+
+            {/* BODY */}
+            <div
+                className={`flex-1 overflow-y-auto p-4 space-y-4 transition-all ${isProcessing ? "pointer-events-none opacity-70" : ""
+                    }`}
+            >
+                {/* ===================== */}
+                {/* MANUAL TAB */}
+                {/* ===================== */}
+                {activeTab === "manual" && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.25 }}
+                        className="space-y-4"
+                    >
+                        <div className="rounded-xl border border-border bg-card/80 p-3 space-y-3">
+                            <div className="text-xs text-muted-foreground flex items-center gap-2">
+                                <FileText size={14} className="text-red-500" />
+                                Ticket Manual
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-xs font-semibold text-foreground">
+                                    Título
+                                </label>
+                                <Input
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
+                                    placeholder="Ej: Error de VPN"
+                                    className="h-9 rounded-xl"
+                                    disabled={isProcessing}
+                                />
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-xs font-semibold text-foreground">
+                                    Descripción
+                                </label>
+
+                                <textarea
+                                    value={description}
+                                    onChange={(e) => {
+                                        if (e.target.value.length <= maxDescLength) {
+                                            setDescription(e.target.value)
+                                        }
+                                    }}
+                                    placeholder="Describe el problema con detalle técnico..."
+                                    disabled={isProcessing}
+                                    className="w-full min-h-[150px] resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/40 transition-all"
+                                />
+
+                                <div className="flex justify-between text-[11px] text-muted-foreground">
+                                    <span>
+                                        Min recomendado: {minDescLength} caracteres
+                                    </span>
+                                    <span
+                                        className={`font-semibold ${descValid ? "text-green-500" : "text-red-500"
+                                            }`}
+                                    >
+                                        {descCount}/{maxDescLength}
+                                    </span>
+                                </div>
+
+                                <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+                                    <div
+                                        className="h-full bg-gradient-to-r from-red-500 to-pink-500 transition-all"
+                                        style={{ width: `${(descCount / maxDescLength) * 100}%` }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <Button
+                            onClick={handleManualClick}
+                            disabled={isProcessing}
+                            className="w-full h-11 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold shadow-md"
                         >
-                            <input
-                                type="file"
-                                ref={fileInputRef}
-                                onChange={(e) => { if (e.target.files && e.target.files.length > 0) setSelectedFile(e.target.files[0]); }}
-                                accept=".csv"
-                                className="hidden"
-                            />
-                            {selectedFile ? (
+                            {isProcessing ? (
                                 <>
-                                    <div className="p-2 rounded-full bg-emerald-500/10 text-emerald-500 mb-2"><FileSpreadsheet size={20} /></div>
-                                    <p className="text-[11px] font-bold text-emerald-500 mb-1 truncate max-w-[200px] text-center leading-tight">{selectedFile.name}</p>
-                                    <p className="text-[9px] text-muted-foreground">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                                    <Loader2 size={16} className="animate-spin mr-2" />
+                                    Analizando...
                                 </>
                             ) : (
                                 <>
-                                    <div className="p-2 rounded-full bg-primary/10 text-primary mb-2"><UploadCloud size={20} /></div>
-                                    <p className="text-[11px] font-bold text-foreground mb-1">Arrastrar archivo .csv</p>
-                                    <Button variant="secondary" size="sm" className="h-7 text-[10px] pointer-events-none px-3 py-0 mt-3">Explorar Archivos</Button>
+                                    <PlayCircle size={16} className="mr-2" />
+                                    Analizar Ticket
                                 </>
                             )}
+                        </Button>
+
+                        <div className="rounded-xl border border-border bg-muted/30 p-3 text-[11px] text-muted-foreground leading-relaxed flex gap-2">
+                            <ShieldAlert size={14} className="text-red-500 shrink-0 mt-0.5" />
+                            <div>
+                                Evita descripciones vacías o irrelevantes. El sistema puede
+                                rechazar tickets considerados "basura" por heurística NLP.
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+
+                {/* ===================== */}
+                {/* BATCH TAB */}
+                {/* ===================== */}
+                {activeTab === "batch" && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.25 }}
+                        className="space-y-4"
+                    >
+                        <div className="rounded-xl border border-border bg-card/80 p-3 space-y-2">
+                            <div className="text-xs text-muted-foreground flex items-center gap-2">
+                                <UploadCloud size={14} className="text-red-500" />
+                                Subida Masiva (CSV)
+                            </div>
+
+                            <div className="text-[11px] text-muted-foreground leading-relaxed">
+                                Sube un archivo CSV con columnas obligatorias:
+                                <b> title, description, department</b>
+                            </div>
                         </div>
 
-                        <div className="shrink-0 space-y-1.5 min-h-[40px]">
-                            {processedCount > 0 && (
-                                <div className="p-2.5 rounded-lg bg-muted/30 border border-border">
-                                    <div className="flex justify-between text-[9px] font-bold text-muted-foreground mb-1">
-                                        <span>{processedCount.toLocaleString()} / {totalInCsv.toLocaleString()} procesados</span>
-                                        <span className="text-primary">{progressValue}%</span>
-                                    </div>
-                                    <Progress value={progressValue} className="h-1 bg-secondary [&>div]:bg-primary transition-all duration-500" />
-                                </div>
-                            )}
+                        <div
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={handleDrop}
+                            className="rounded-xl border border-dashed border-border bg-muted/20 hover:bg-muted/30 transition-all p-5 flex flex-col items-center justify-center text-center cursor-pointer"
+                            onClick={handleBrowseClick}
+                        >
+                            <UploadCloud size={30} className="text-red-500 mb-2" />
+
+                            <div className="text-sm font-semibold">
+                                {csvFile ? csvFile.name : "Selecciona o arrastra un CSV"}
+                            </div>
+
+                            <div className="text-xs text-muted-foreground mt-1">
+                                Compatible con 3,000+ tickets
+                            </div>
+
+                            <div className="mt-3 text-[11px] text-muted-foreground">
+                                Click para buscar archivo
+                            </div>
                         </div>
-                        <Button size="sm" variant="outline" className={`shrink-0 w-full font-bold border-border hover:bg-muted rounded-lg mt-1 h-8 text-[10px] ${isProcessing && 'animate-pulse-glow border-primary'}`} onClick={handleProcessCSV} disabled={isProcessing || !selectedFile}>
-                            {isProcessing ? "Entrenando Motor..." : "Entrenar y Procesar"}
+
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".csv"
+                            className="hidden"
+                            onChange={(e) => {
+                                const f = e.target.files?.[0]
+                                if (!f) return
+                                handleFileSelect(f)
+                            }}
+                            disabled={isProcessing}
+                        />
+
+                        <Button
+                            onClick={() => {
+                                if (!csvFile) {
+                                    toast.warning("No hay archivo seleccionado")
+                                    return
+                                }
+                                onBatchUpload(csvFile)
+                            }}
+                            disabled={isProcessing || !csvFile}
+                            className="w-full h-11 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold shadow-md"
+                        >
+                            {isProcessing ? (
+                                <>
+                                    <Loader2 size={16} className="animate-spin mr-2" />
+                                    Procesando...
+                                </>
+                            ) : (
+                                <>
+                                    <PlayCircle size={16} className="mr-2" />
+                                    Ejecutar Batch
+                                </>
+                            )}
                         </Button>
-                    </TabsContent>
-                </Tabs>
-            </CardContent>
+                    </motion.div>
+                )}
+            </div>
         </Card>
     )
 }

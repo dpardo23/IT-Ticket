@@ -1,0 +1,10 @@
+{
+    "saved_at": "2026-05-20T18:15:58.664114",
+    "model_name": "Multinomial NB",
+    "params": {},
+    "f1_score": 100.0,
+    "accuracy": 0.0,
+    "dataset_size": 1,
+    "feedback_count": 1,
+    "last_retrain_feedback_count": 0
+}

@@ -1,0 +1,5 @@
+text,department,timestamp
+"Aplicación interna extremadamente lenta
+Usuarios reportan que el sistema interno tarda demasiado en responder.
+A veces falla el login y otras veces simplemente queda cargando.
+Se observan problemas intermitentes desde ayer.",DevOps,2026-05-20T18:15:58.626976

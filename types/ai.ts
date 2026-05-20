@@ -1,45 +1,33 @@
-export interface TokenWeight {
-    token: string;
-    weight: number;
-}
-
-export interface ProbabilityData {
-    name: string;
-    value: number;
-}
-
 export interface SingleInferenceResult {
-    title: string;
-    original: string;
-    tokens: string[];
-    topTfidf: TokenWeight[];
-    probabilities: ProbabilityData[];
-    winner: string;
-    level: string; // <-- AÑADIDO PARA LA UI
-}
+    winner: string
+    probabilities: Record<string, number>
+    tokens: string[]
+    latency: number
+    level?: string
 
-export interface BatchInferenceStats {
-    name: string;
-    tickets: number;
-    desc: string;
-    color: string;
-}
+    // NUEVOS CAMPOS REALES (deben venir del backend)
+    originalText?: string
+    cleanText?: string
 
-export interface LevelStats {
-    name: string;
-    value: number;
+    topTfidf?: Array<{ term: string; weight: number }>
 }
 
 export interface BatchInferenceResult {
-    processedCount: number;
-    totalTickets: number;
-    accuracy: number;
-    f1Score: number;
-    confusionMatrix: number[][];
-    optimalAlpha: number;
-    bestModelName: string;
-    speed: number;
-    departmentStats: BatchInferenceStats[];
-    globalTfidf: TokenWeight[];
-    levelStats: LevelStats[];
+    totalTickets: number
+    processedCount: number
+    rejectedCount: number
+
+    f1Score: number
+    accuracy: number
+
+    bestModelName: string
+    optimalAlpha?: number
+
+    confusionMatrix?: number[][]
+    labels?: string[]
+
+    departmentDistribution?: Record<string, number>
+    globalTfidf?: Array<{ term: string; weight: number }>
+
+    speed: number
 }

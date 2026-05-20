@@ -1,33 +1,62 @@
-import spacy
 import re
+import unicodedata
 
-# Cargamos el modelo en español que instalaste
-try:
-    nlp = spacy.load("es_core_news_sm")
-except OSError:
-    print("Error: No se encontró el modelo de spaCy. Ejecuta: python -m spacy download es_core_news_sm")
+STOPWORDS = {
+    "de",
+    "la",
+    "el",
+    "los",
+    "las",
+    "y",
+    "o",
+    "u",
+    "a",
+    "ante",
+    "con",
+    "sin",
+    "por",
+    "para",
+    "en",
+    "un",
+    "una",
+    "unos",
+    "unas",
+    "que",
+    "se",
+    "del",
+    "al",
+    "es",
+    "son",
+}
 
-def clean_text(text: str) -> str:
-    """
-    Limpia, tokeniza y lematiza el texto crudo.
-    """
-    if not text:
-        return ""
-        
-    # 1. Limpieza básica (quitar números, símbolos, pasar a minúsculas)
-    text = re.sub(r'[^a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]', ' ', text).lower()
-    
-    # 2. Procesamiento con spaCy
-    doc = nlp(text)
-    
-    # 3. Lematización y filtro de stopwords
-    clean_tokens = []
-    for token in doc:
-        if not token.is_stop and not token.is_punct and not token.is_space and len(token.text) > 2:
-            clean_tokens.append(token.lemma_)
-            
-    return " ".join(clean_tokens)
 
-def get_tokens_list(text: str) -> list:
-    """Devuelve la lista de tokens para visualización en el frontend."""
-    return clean_text(text).split()
+def normalize_text(text: str) -> str:
+    text = text.lower()
+
+    text = unicodedata.normalize("NFD", text)
+    text = text.encode("ascii", "ignore").decode("utf-8")
+
+    text = re.sub(r"[^a-zA-Z0-9\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
+
+def tokenize(text: str) -> list[str]:
+    return text.split()
+
+
+def remove_stopwords(tokens: list[str]) -> list[str]:
+    return [t for t in tokens if t not in STOPWORDS and len(t) > 2]
+
+
+def preprocess_text(text: str):
+    normalized = normalize_text(text)
+
+    tokens = tokenize(normalized)
+
+    clean_tokens = remove_stopwords(tokens)
+
+    clean_text = " ".join(clean_tokens)
+
+    return clean_text, clean_tokens

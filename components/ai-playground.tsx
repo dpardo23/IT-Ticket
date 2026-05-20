@@ -1,289 +1,273 @@
-"use client"
+'use client'
 
-import React, { useState, useRef } from "react"
-import { InputPanel } from "./playground/input-panel"
-import { ReasoningPanel } from "./playground/reasoning-panel"
-import { TerminalPanel } from "./playground/terminal-panel"
-import { SingleInferenceResult, BatchInferenceStats, TokenWeight, LevelStats } from "@/types/ai"
-import { Server, ShieldAlert, Database, Bug } from "lucide-react"
+import React, { useRef, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { toast } from 'sonner'
+
+import { InputPanel } from './playground/input-panel'
+import { ReasoningPanel } from './playground/reasoning-panel'
+import { TerminalPanel } from './playground/terminal-panel'
+
+import type { SingleInferenceResult, BatchInferenceResult } from '@/types/ai'
 
 export default function AIPlayground() {
-    const [activeTab, setActiveTab] = useState<string>("manual")
-    const [isProcessing, setIsProcessing] = useState<boolean>(false)
-    const [loadingStep, setLoadingStep] = useState<number>(0)
+    const [activeTab, setActiveTab] = useState<'manual' | 'batch'>('manual')
+    const [isProcessing, setIsProcessing] = useState(false)
 
-    const [manualTitle, setManualTitle] = useState<string>("")
-    const [manualTicket, setManualTicket] = useState<string>("")
-    const [singleResult, setSingleResult] = useState<SingleInferenceResult | null>(null)
-    const [garbageError, setGarbageError] = useState<string | null>(null)
+    const [manualResult, setManualResult] = useState<SingleInferenceResult | null>(null)
+    const [batchResult, setBatchResult] = useState<BatchInferenceResult | null>(null)
 
-    const [csvStats, setCsvStats] = useState<BatchInferenceStats[]>([])
-    const [batchTfidf, setBatchTfidf] = useState<TokenWeight[]>([])
-    const [levelStats, setLevelStats] = useState<LevelStats[]>([])
-    const [processedCount, setProcessedCount] = useState<number>(0)
-    const [totalInCsv, setTotalInCsv] = useState<number>(0)
-    const [progressValue, setProgressValue] = useState<number>(0)
-    const [selectedFile, setSelectedFile] = useState<File | null>(null)
-
-    const [f1Score, setF1Score] = useState<number>(0)
-    const [confusionMatrix, setConfusionMatrix] = useState<number[][]>([])
-    const [optimalAlpha, setOptimalAlpha] = useState<number>(0)
-    const [bestModelName, setBestModelName] = useState<string>("")
-    const [batchLatency, setBatchLatency] = useState<number>(0)
-    const [singleLatency, setSingleLatency] = useState<number>(0)
-
-    const [terminalLogs, setTerminalLogs] = useState<string[]>([
-        `[INFO] ${new Date().toISOString().split('T')[1].slice(0, -4)} - Frontend Client inicializado.`,
-        "[INFO] Esperando interacción del usuario para conectar con la API FastAPI..."
-    ])
+    const [logs, setLogs] = useState<string[]>([])
     const terminalRef = useRef<HTMLDivElement>(null)
-    const [isLearning, setIsLearning] = useState<boolean>(false)
-    const [feedbackGiven, setFeedbackGiven] = useState<boolean>(false)
 
-    const addLog = (msg: string) => {
-        setTerminalLogs(prev => [...prev, `[${new Date().toISOString().split('T')[1].slice(0, -4)}] ${msg}`])
+    const pushLog = (msg: string) => {
+        setLogs((prev) => [...prev, `[INFO] ${new Date().toLocaleTimeString()} - ${msg}`])
     }
 
-    const handleClear = () => {
-        setManualTitle("");
-        setManualTicket("");
-        setSingleResult(null);
-        setGarbageError(null);
-        setFeedbackGiven(false);
-        addLog(">> [CLIENTE] Interfaz limpiada. Listo para nuevo ingreso.");
+    const pushSuccess = (msg: string) => {
+        setLogs((prev) => [...prev, `[SUCCESS] ${new Date().toLocaleTimeString()} - ${msg}`])
     }
 
-    const handleAnalyzeManual = async () => {
-        if (!manualTicket || !manualTitle) return;
-        setIsProcessing(true);
-        setSingleResult(null);
-        setGarbageError(null);
-        setFeedbackGiven(false);
-        setLoadingStep(1);
+    const pushError = (msg: string) => {
+        setLogs((prev) => [...prev, `[ERROR] ${new Date().toLocaleTimeString()} - ${msg}`])
+    }
 
-        addLog(`>> [CLIENTE] Iniciando POST http://localhost:8000/api/predict`);
-        addLog(`>> [CLIENTE] PAYLOAD: { title: "${manualTitle.substring(0, 15)}...", size: ${manualTicket.length} bytes }`);
+    // ==============================
+    // MANUAL INFERENCE
+    // ==============================
+    const handleManualSubmit = async (title: string, description: string) => {
+        setIsProcessing(true)
+        setManualResult(null)
+
+        pushLog('Iniciando inferencia manual...')
+        pushLog('Preprocesando texto (tokenización + limpieza)...')
+
+        toast.loading('Ejecutando inferencia manual...', { id: 'manual' })
 
         try {
-            const startTime = performance.now();
+            const start = performance.now()
 
-            const response = await fetch("http://localhost:8000/api/predict", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: manualTitle, description: manualTicket })
-            });
+            const res = await fetch('http://localhost:8000/api/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, description }),
+            })
 
-            if (!response.ok) throw new Error(`HTTP Error ${response.status}: Conexión rechazada.`);
+            const data = await res.json()
+            const end = performance.now()
 
-            await new Promise(r => setTimeout(r, 400));
-            setLoadingStep(2);
-
-            const data = await response.json();
+            if (!res.ok) {
+                pushError(data.detail || 'Error desconocido en backend.')
+                toast.error(data.detail || 'Error en inferencia manual', { id: 'manual' })
+                return
+            }
 
             if (data.is_garbage) {
-                setGarbageError(data.message);
-                addLog(`>> [WARNING] 406 Not Acceptable - Rechazado por Filtro Heurístico.`);
-                setIsProcessing(false);
-                return;
+                pushError('Ticket rechazado por heurística de basura.')
+                toast.warning(data.message || 'Ticket inválido', { id: 'manual' })
+                return
             }
 
-            const latency = Math.round(performance.now() - startTime);
-            setSingleLatency(latency);
+            // BACKEND SAFE PARSING
+            const safeProbabilities: Record<string, number> = data.probabilities ?? {}
+            const safeTokens: string[] = data.tokens ?? []
 
-            if (data.f1Score !== undefined) setF1Score(data.f1Score);
-            if (data.optimalAlpha !== undefined) setOptimalAlpha(data.optimalAlpha);
-            if (data.bestModelName !== undefined) setBestModelName(data.bestModelName);
-            if (data.confusionMatrix !== undefined) setConfusionMatrix(data.confusionMatrix);
+            const safeTopTfidf: Array<{ term: string; weight: number }> =
+                data.topTfidf ??
+                data.top_tfidf ??
+                []
 
-            await new Promise(r => setTimeout(r, 400));
-            setLoadingStep(3);
+            const result: SingleInferenceResult = {
+                winner: data.winner ?? 'N/A',
+                probabilities: safeProbabilities,
+                tokens: safeTokens,
+                latency: data.latency ?? Math.round(end - start),
+                level: data.level ?? 'N/A',
 
-            if (data.backend_logs && Array.isArray(data.backend_logs)) {
-                data.backend_logs.forEach((log: string) => addLog(log));
+                originalText: data.originalText ?? data.original_text ?? `${title}\n${description}`,
+                cleanText: data.cleanText ?? data.cleaned_text ?? '',
+
+                topTfidf: safeTopTfidf,
             }
 
-            await new Promise(r => setTimeout(r, 400));
-            setLoadingStep(4);
-            addLog(`>> [SUCCESS] 200 OK - Latencia de red: ${latency}ms`);
+            setManualResult(result)
 
-            setSingleResult({
-                title: data.title,
-                original: data.original,
-                tokens: data.tokens,
-                topTfidf: data.topTfidf,
-                probabilities: data.probabilities.map((prob: any) => ({
-                    ...prob,
-                    icon: prob.name.includes("SysAdmin") ? <Server size={12} /> :
-                        prob.name.includes("SecOps") ? <ShieldAlert size={12} /> :
-                            prob.name.includes("DevOps") ? <Bug size={12} /> : <Database size={12} />
-                })),
-                winner: data.winner,
-                level: data.level // <-- CAPTURADO DESDE LA API
-            });
+            pushSuccess(`Inferencia completada. Winner: ${result.winner}`)
+            pushLog(`Latencia: ${result.latency}ms`)
 
-        } catch (error: any) {
-            addLog(`>> [CRITICAL ERROR]: ${error.message}`);
+            toast.success(`Clasificado como: ${result.winner}`, {
+                id: 'manual',
+                description: `Latencia ${result.latency} ms`,
+            })
+        } catch (err: any) {
+            pushError(`Fallo conexión backend: ${err.message}`)
+            toast.error('No se pudo conectar al backend.', { id: 'manual' })
         } finally {
-            setIsProcessing(false);
+            setIsProcessing(false)
         }
     }
 
-    const handleProcessCSV = async () => {
-        if (!selectedFile) return;
-        setIsProcessing(true);
-        setProcessedCount(0);
-        setProgressValue(0);
-        setGarbageError(null);
-        setLoadingStep(1);
+    // ==============================
+    // FEEDBACK
+    // ==============================
+    const handleFeedback = async (originalText: string, correctDepartment: string) => {
+        setIsProcessing(true)
+        pushLog(`Registrando feedback humano -> ${correctDepartment}`)
 
-        addLog(`>> [CLIENTE] INICIANDO: POST http://localhost:8000/api/batch`);
-        addLog(`>> [CLIENTE] Preparando lote y validación K-Fold. Archivo: ${selectedFile.name}`);
-
-        const formData = new FormData();
-        formData.append("file", selectedFile);
+        toast.loading('Enviando feedback...', { id: 'feedback' })
 
         try {
-            const startTime = performance.now();
-
-            const progressInterval = setInterval(() => {
-                setProgressValue(prev => prev < 90 ? prev + 10 : prev);
-            }, 500);
-
-            const response = await fetch("http://localhost:8000/api/batch", {
-                method: "POST",
-                body: formData
-            });
-
-            clearInterval(progressInterval);
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || `Error HTTP ${response.status}`);
-            }
-
-            await new Promise(r => setTimeout(r, 500));
-            setLoadingStep(2);
-
-            const data = await response.json();
-            const latency = Math.round(performance.now() - startTime);
-
-            await new Promise(r => setTimeout(r, 500));
-            setLoadingStep(3);
-
-            if (data.backend_logs && Array.isArray(data.backend_logs)) {
-                data.backend_logs.forEach((log: string) => addLog(log));
-            }
-
-            await new Promise(r => setTimeout(r, 600));
-            setLoadingStep(4);
-
-            setProcessedCount(data.processedCount);
-            setTotalInCsv(data.totalTickets);
-            setProgressValue(100);
-
-            setF1Score(data.f1Score);
-            setConfusionMatrix(data.confusionMatrix || []);
-            setOptimalAlpha(data.optimalAlpha);
-            setBestModelName(data.bestModelName);
-            setBatchLatency(data.speed);
-
-            setCsvStats(data.departmentStats);
-            setLevelStats(data.levelStats);
-            setBatchTfidf(data.globalTfidf.slice(0, 10));
-
-            addLog(`>> [SUCCESS] Matriz óptima generada y persistida en ${latency}ms.`);
-
-        } catch (error: any) {
-            addLog(`>> [ERROR BATCH]: ${error.message}`);
-            setProgressValue(0);
-            setGarbageError(error.message);
-        } finally {
-            setIsProcessing(false);
-        }
-    }
-
-    const handleFeedback = async (isCorrect: boolean) => {
-        if (!singleResult) return;
-
-        setIsLearning(true);
-        setFeedbackGiven(true);
-
-        let correctDept = singleResult.winner;
-
-        if (!isCorrect) {
-            const userInput = window.prompt(
-                "APRENDIZAJE ONLINE (Human-in-the-Loop):\nLa IA clasificó esto de forma errónea. Ingresa el departamento correcto para recalibrar los tensores matemáticos:\n(Opciones: Mesa de Servicios, Microinformática, SysAdmins, NetOps, SecOps / IAM, DevOps)"
-            );
-
-            if (!userInput) {
-                addLog(">> [WARNING] Operación cancelada. El ajuste de pesos (partial_fit) fue abortado por el usuario.");
-                setIsLearning(false);
-                setFeedbackGiven(false);
-                return;
-            }
-            correctDept = userInput;
-        }
-
-        addLog(`>> [CLIENTE] INICIANDO: POST http://localhost:8000/api/feedback`);
-        addLog(`>> [CLIENTE] ENVIANDO GROUND TRUTH: '${correctDept}'`);
-
-        try {
-            const startTime = performance.now();
-
-            const response = await fetch("http://localhost:8000/api/feedback", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
+            const res = await fetch('http://localhost:8000/api/feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    original_text: singleResult.title + " " + singleResult.original,
-                    correct_department: correctDept
-                })
-            });
+                    original_text: originalText,
+                    correct_department: correctDepartment,
+                }),
+            })
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || `Error interno HTTP ${response.status}`);
+            const data = await res.json()
+
+            if (!res.ok) {
+                pushError(data.detail || 'Error desconocido en feedback.')
+                toast.error(data.detail || 'Error registrando feedback', { id: 'feedback' })
+                return
             }
 
-            const data = await response.json();
-            const latency = Math.round(performance.now() - startTime);
+            pushSuccess('Feedback guardado correctamente.')
+            if (data.learnedImmediately) pushSuccess('Aprendizaje incremental aplicado (SGD partial_fit).')
+            if (data.retrainedBatch) pushSuccess('Reentrenamiento batch automático ejecutado.')
 
-            if (data.backend_logs && Array.isArray(data.backend_logs)) {
-                data.backend_logs.forEach((log: string) => addLog(log));
-            }
-
-            addLog(`>> [SUCCESS] 200 OK - Latencia total: ${latency}ms`);
-
-        } catch (error: any) {
-            addLog(`>> [ERROR EN APRENDIZAJE]: ${error.message}`);
-            setFeedbackGiven(false);
+            toast.success('Feedback registrado', {
+                id: 'feedback',
+                description: data.message || 'Dataset actualizado correctamente',
+            })
+        } catch (err: any) {
+            pushError(`Fallo feedback: ${err.message}`)
+            toast.error('No se pudo enviar feedback.', { id: 'feedback' })
         } finally {
-            setIsLearning(false);
+            setIsProcessing(false)
+        }
+    }
+
+    // ==============================
+    // BATCH CSV
+    // ==============================
+    const handleBatchUpload = async (file: File) => {
+        setIsProcessing(true)
+        setBatchResult(null)
+
+        pushLog(`Cargando CSV batch: ${file.name}`)
+        pushLog('Validando estructura del CSV...')
+        pushLog('Ejecutando clasificación masiva...')
+
+        toast.loading('Procesando CSV batch...', { id: 'batch' })
+
+        try {
+            const start = performance.now()
+
+            const formData = new FormData()
+            formData.append('file', file)
+
+            const res = await fetch('http://localhost:8000/api/batch', {
+                method: 'POST',
+                body: formData,
+            })
+
+            const data = await res.json()
+            const end = performance.now()
+
+            if (!res.ok) {
+                pushError(data.detail || 'Error batch desconocido.')
+                toast.error(data.detail || 'Error procesando batch', { id: 'batch' })
+                return
+            }
+
+            const result: BatchInferenceResult = {
+                totalTickets: data.totalTickets ?? 0,
+                processedCount: data.processedCount ?? 0,
+                rejectedCount: data.rejectedCount ?? 0,
+
+                f1Score: data.f1Score ?? 0,
+                accuracy: data.accuracy ?? 0,
+
+                bestModelName: data.bestModelName ?? 'N/A',
+                optimalAlpha: data.optimalAlpha ?? null,
+
+                confusionMatrix: data.confusionMatrix ?? [],
+                labels: data.labels ?? [],
+
+                departmentDistribution: data.departmentDistribution ?? {},
+                globalTfidf: data.globalTfidf ?? [],
+
+                speed: data.speed ?? Math.round(end - start),
+            }
+
+            setBatchResult(result)
+
+            pushSuccess(`Batch completado: ${result.processedCount} tickets procesados.`)
+            pushLog(`Modelo ganador: ${result.bestModelName}`)
+            pushLog(`F1-score: ${result.f1Score}`)
+            pushLog(`Tiempo total: ${result.speed}ms`)
+
+            toast.success('Batch completado', {
+                id: 'batch',
+                description: `${result.processedCount} procesados | F1 ${result.f1Score.toFixed(3)}`,
+            })
+        } catch (err: any) {
+            pushError(`Fallo batch: ${err.message}`)
+            toast.error('No se pudo conectar al backend.', { id: 'batch' })
+        } finally {
+            setIsProcessing(false)
         }
     }
 
     return (
-        <div className="h-full flex flex-col xl:flex-row gap-4 min-h-0 w-full">
-            <InputPanel
-                activeTab={activeTab} setActiveTab={setActiveTab}
-                isProcessing={isProcessing}
-                manualTitle={manualTitle} setManualTitle={setManualTitle}
-                manualTicket={manualTicket} setManualTicket={setManualTicket}
-                handleAnalyzeManual={handleAnalyzeManual}
-                handleProcessCSV={handleProcessCSV}
-                handleClear={handleClear}
-                processedCount={processedCount} totalInCsv={totalInCsv} progressValue={progressValue}
-                selectedFile={selectedFile} setSelectedFile={setSelectedFile}
-            />
-            <div className="flex flex-col gap-4 h-full min-h-0 xl:w-[74%] w-full">
-                <ReasoningPanel
-                    activeTab={activeTab} isProcessing={isProcessing} loadingStep={loadingStep}
-                    singleResult={singleResult} garbageError={garbageError} csvStats={csvStats} batchTfidf={batchTfidf} levelStats={levelStats}
-                    processedCount={processedCount} feedbackGiven={feedbackGiven} isLearning={isLearning} handleFeedback={handleFeedback}
-                    f1Score={f1Score} confusionMatrix={confusionMatrix} optimalAlpha={optimalAlpha} bestModelName={bestModelName} batchLatency={batchLatency}
-                    singleLatency={singleLatency}
-                />
-                <TerminalPanel logs={terminalLogs} isProcessing={isProcessing} terminalRef={terminalRef} />
-            </div>
+        <div className="w-full h-full flex flex-col overflow-hidden">
+            <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35 }}
+                className="grid grid-cols-12 gap-4 h-full overflow-hidden"
+            >
+                <div className="col-span-4 h-full overflow-hidden">
+                    <InputPanel
+                        activeTab={activeTab}
+                        setActiveTab={setActiveTab}
+                        isProcessing={isProcessing}
+                        onManualSubmit={handleManualSubmit}
+                        onBatchUpload={handleBatchUpload}
+                    />
+                </div>
+
+                <div className="col-span-8 h-full overflow-hidden flex flex-col gap-4">
+                    <div className="flex-1 overflow-hidden">
+                        <AnimatePresence mode="wait">
+                            <motion.div
+                                key={activeTab}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                transition={{ duration: 0.25 }}
+                                className="h-full"
+                            >
+                                <ReasoningPanel
+                                    activeTab={activeTab}
+                                    manualResult={manualResult}
+                                    batchResult={batchResult}
+                                    isProcessing={isProcessing}
+                                    onFeedback={handleFeedback}
+                                />
+                            </motion.div>
+                        </AnimatePresence>
+                    </div>
+
+                    {/* Terminal abajo tipo consola MLOps */}
+                    <div className="h-[180px] overflow-hidden">
+                        <TerminalPanel logs={logs} isProcessing={isProcessing} terminalRef={terminalRef} />
+                    </div>
+                </div>
+            </motion.div>
         </div>
     )
 }
